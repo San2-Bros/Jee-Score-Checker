@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JEE ScoreX - Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 700px;
+      margin: auto;
+      background: #1e293b;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(56,189,248,0.3);
+    }
+    h1 {
+      text-align: center;
+      color: #38bdf8;
+    }
+    input[type="file"] {
+      display: block;
+      margin: 1rem 0;
+      padding: 0.5rem;
+      width: 100%;
+    }
+    button {
+      background-color: #38bdf8;
+      color: #0f172a;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 1rem;
+    }
+    #loading {
+      text-align: center;
+      margin: 1rem 0;
+      display: none;
+    }
+    .results div {
+      background: #334155;
+      padding: 0.75rem;
+      margin-top: 1rem;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>JEE ScoreX</h1>
+    <label>Upload Response Sheet PDF:</label>
+    <input type="file" id="responseSheet" accept="application/pdf"/>
+
+    <label>Upload Final Answer Key PDF:</label>
+    <input type="file" id="answerKey" accept="application/pdf"/>
+
+    <button onclick="analyzePDFs()">Analyze My Score</button>
+    <div id="loading">Analyzing PDFs... Please wait.</div>
+
+    <div class="results" id="results"></div>
+    <button onclick="downloadReport()" style="display:none" id="downloadBtn">Download Report</button>
+  </div>
+
+  <script>
+    let finalScoreData = "";
+
+    async function extractTextFromPDF(file) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items.map(item => item.str).join(' ');
+          text += pageText + '\\n';
+        }
+        return text;
+      } catch (error) {
+        console.error("PDF parsing error:", error);
+        alert("Error reading PDF. Please upload valid JEE PDFs.");
+        return "";
+      }
+    }
+
+    function parseMockData(text, type) {
+      const data = {};
+      const lines = text.split('\\n');
+      lines.forEach(line => {
+        const match = line.match(/(Q\\d{1,3})\\s+Option\\s+Chosen\\s*:\\s*(\\w)/i);
+        if (match) data[match[1]] = match[2];
+
+        if (type === 'key') {
+          const keyMatch = line.match(/(Q\\d{1,3})\\s+Correct\\s+Answer\\s*:\\s*(\\w)/i);
+          if (keyMatch) data[keyMatch[1]] = keyMatch[2];
+        }
+      });
+      return data;
+    }
+
+    async function analyzePDFs() {
+      const responseFile = document.getElementById("responseSheet").files[0];
+      const answerFile = document.getElementById("answerKey").files[0];
+      const loading = document.getElementById("loading");
+      const resultsDiv = document.getElementById("results");
+
+      if (!responseFile || !answerFile) {
+        alert("Please upload both the Response Sheet and Answer Key PDFs.");
+        return;
+      }
+
+      loading.style.display = "block";
+      resultsDiv.innerHTML = "";
+      document.getElementById("downloadBtn").style.display = "none";
+
+      const responseText = await extractTextFromPDF(responseFile);
+      const answerText = await extractTextFromPDF(answerFile);
+
+      if (!responseText || !answerText) {
+        loading.style.display = "none";
+        return;
+      }
+
+      const responses = parseMockData(responseText, 'response');
+      const answers = parseMockData(answerText, 'key');
+
+      let correct = 0, wrong = 0, unattempted = 0;
+      const correctMark = 4, wrongMark = -1;
+
+      for (const [qid, correctAns] of Object.entries(answers)) {
+        const userAns = responses[qid] || "";
+        if (!userAns) unattempted++;
+        else if (userAns === correctAns) correct++;
+        else wrong++;
+      }
+
+      const score = correct * correctMark + wrong * wrongMark;
+      const totalCandidates = 1000000;
+      const mockRank = Math.max(1, Math.floor(((300 - score) / 300) * totalCandidates));
+      const percentile = ((totalCandidates - mockRank) / totalCandidates * 100).toFixed(2);
+
+      const output = `
+        <div><strong>Correct Answers:</strong> ${correct}</div>
+        <div><strong>Wrong Answers:</strong> ${wrong}</div>
+        <div><strong>Unattempted:</strong> ${unattempted}</div>
+        <div><strong>Final Score:</strong> ${score}</div>
+        <div><strong>Predicted Percentile:</strong> ${percentile}</div>
+      `;
+      resultsDiv.innerHTML = output;
+      loading.style.display = "none";
+      document.getElementById("downloadBtn").style.display = "block";
+
+      finalScoreData = output.replace(/<[^>]+>/g, '').trim();
+    }
+
+    function downloadReport() {
+      const blob = new Blob([finalScoreData], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "jee_score_report.txt";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+  </html>
+  
